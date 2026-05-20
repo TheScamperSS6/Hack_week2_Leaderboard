@@ -1,0 +1,13 @@
+{
+  "evaluation_mode": "type",
+  "videos": [
+    {"cctv_id": "CCTV01", "video_path": "data/videos/clip_000.mp4"},
+    {"cctv_id": "CCTV02", "video_path": "data/videos/clip_001.mp4"},
+    {"cctv_id": "CCTV03", "video_path": "data/videos/clip_002.mp4"},
+    {"cctv_id": "CCTV04", "video_path": "data/videos/clip_003.mp4"},
+    {"cctv_id": "CCTV05", "video_path": "data/videos/clip_004.mp4"}
+  ],
+  "questions_csv_path": "data/questions_type.csv",
+  "answers_csv_path": "data/answers_type.csv",
+  "roi_json_path": "data/rois.json"
+}

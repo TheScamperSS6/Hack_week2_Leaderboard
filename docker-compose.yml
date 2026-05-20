@@ -1,0 +1,110 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: cv_leaderboard_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: cv-leaderboard-backend:latest
+    container_name: cv_leaderboard_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://postgres:postgres@host.docker.internal:5432/leaderboard}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      STORAGE_ROOT: storage/submissions
+      PREVIEW_ROOT: storage/previews
+      AUTO_PROCESS_SUBMISSIONS: ${AUTO_PROCESS_SUBMISSIONS:-true}
+      AUTO_PROCESS_BRAND_PAYLOAD: data/process_payload_brand.example.json
+      AUTO_PROCESS_TYPE_PAYLOAD: data/process_payload_type.example.json
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      YOLO_AUTOINSTALL: "false"
+      YOLO_CONFIG_DIR: /tmp/ultralytics
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    image: cv-leaderboard-backend:latest
+    container_name: cv_leaderboard_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://postgres:postgres@host.docker.internal:5432/leaderboard}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      STORAGE_ROOT: storage/submissions
+      PREVIEW_ROOT: storage/previews
+      AUTO_PROCESS_SUBMISSIONS: ${AUTO_PROCESS_SUBMISSIONS:-true}
+      AUTO_PROCESS_BRAND_PAYLOAD: data/process_payload_brand.example.json
+      AUTO_PROCESS_TYPE_PAYLOAD: data/process_payload_type.example.json
+      YOLO_AUTOINSTALL: "false"
+      YOLO_CONFIG_DIR: /tmp/ultralytics
+      CELERY_TASK_TIME_LIMIT: ${CELERY_TASK_TIME_LIMIT:-7200}
+      CELERY_TASK_SOFT_TIME_LIMIT: ${CELERY_TASK_SOFT_TIME_LIMIT:-7000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    command:
+      [
+        "python",
+        "-m",
+        "celery",
+        "-A",
+        "app.celery_app.celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=1",
+      ]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
+        INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
+    image: cv-leaderboard-frontend:latest
+    container_name: cv_leaderboard_frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  redis_data:

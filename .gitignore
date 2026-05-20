@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+storage/
+node_modules/
+.next/
+out/
+npm-debug.log*
+tsconfig.tsbuildinfo

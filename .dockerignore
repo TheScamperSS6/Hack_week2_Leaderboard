@@ -1,0 +1,14 @@
+.git
+.next
+node_modules
+storage
+# Videos are committed for git-pull deployment, but bind-mounted at runtime.
+# Keep them out of Docker build contexts so images stay small.
+data/videos
+__pycache__
+*.py[cod]
+.env
+.venv
+venv
+tsconfig.tsbuildinfo
+npm-debug.log*
