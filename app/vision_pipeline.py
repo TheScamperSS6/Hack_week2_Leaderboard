@@ -48,6 +48,16 @@ class Labels:
     classifier: dict[int, ClassificationLabel]
 
 
+@dataclass(frozen=True)
+class ClassifierInputSpec:
+    input_name: str
+    height: int
+    width: int
+    channels: int
+    layout: str
+    input_type: str
+
+
 Point = tuple[float, float]
 RoiMap = dict[str, list[Point]]
 BBox = tuple[float, float, float, float]
@@ -847,20 +857,79 @@ def bbox_iou(first: BBox, second: BBox) -> float:
 def classify_vehicle(classifier_session: Any, crop: Any, labels: Labels) -> ClassificationLabel:
     cv2 = _import_cv2()
     np = _import_numpy()
+    input_spec = classifier_input_spec(classifier_session)
 
-    resized = cv2.resize(crop, CLASSIFIER_IMAGE_SIZE)
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    tensor = rgb.astype("float32") / 255.0
-    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-    tensor = (tensor - mean) / std
-    tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
+    resized = cv2.resize(crop, (input_spec.width, input_spec.height))
+    if input_spec.channels == 1:
+        image = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)[:, :, None]
+        tensor = image.astype(np.float32) / 255.0
+    else:
+        image = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        tensor = image.astype(np.float32) / 255.0
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        tensor = (tensor - mean) / std
 
-    input_name = classifier_session.get_inputs()[0].name
-    outputs = classifier_session.run(None, {input_name: tensor})
+    if input_spec.layout == "nchw":
+        tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
+    else:
+        tensor = tensor[None, ...]
+
+    if "float16" in input_spec.input_type:
+        tensor = tensor.astype(np.float16)
+    else:
+        tensor = tensor.astype(np.float32)
+
+    outputs = classifier_session.run(None, {input_spec.input_name: tensor})
     logits = outputs[0]
     class_id = int(np.asarray(logits).reshape(-1).argmax())
     return labels.classifier.get(class_id, ClassificationLabel(brand=str(class_id)))
+
+
+def classifier_input_spec(classifier_session: Any) -> ClassifierInputSpec:
+    input_meta = classifier_session.get_inputs()[0]
+    shape = list(input_meta.shape)
+    fallback_height, fallback_width = CLASSIFIER_IMAGE_SIZE
+    height = fallback_height
+    width = fallback_width
+    channels = 3
+    layout = "nchw"
+
+    if len(shape) == 4:
+        first_dim, second_dim, third_dim = shape[1], shape[2], shape[3]
+        first_channels = fixed_channel_count(first_dim)
+        last_channels = fixed_channel_count(third_dim)
+
+        if first_channels is not None:
+            layout = "nchw"
+            channels = first_channels
+            height = positive_int(second_dim) or fallback_height
+            width = positive_int(third_dim) or fallback_width
+        elif last_channels is not None:
+            layout = "nhwc"
+            channels = last_channels
+            height = positive_int(first_dim) or fallback_height
+            width = positive_int(second_dim) or fallback_width
+
+    return ClassifierInputSpec(
+        input_name=input_meta.name,
+        height=height,
+        width=width,
+        channels=channels,
+        layout=layout,
+        input_type=str(getattr(input_meta, "type", "")),
+    )
+
+
+def positive_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def fixed_channel_count(value: Any) -> int | None:
+    channel_count = positive_int(value)
+    if channel_count in {1, 3}:
+        return channel_count
+    return None
 
 
 def _to_numpy(value: Any) -> Any:
