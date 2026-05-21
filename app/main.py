@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.database import Base, engine, get_db
-from app.evaluation import question_results_from_csv
+from app.evaluation import question_results_from_csv, score_submission_from_csv
 from app.model_stats import estimate_onnx_gflops
 from app.preview import preview_video_infos, render_detection_previews
 from app.worker import process_pending_submissions, process_submission
@@ -27,6 +27,7 @@ from app.schemas import (
     SubmissionCreated,
     SubmissionDetail,
     SubmissionResults,
+    SubmissionScore,
     TaskCreated,
     TaskStatus,
 )
@@ -535,6 +536,47 @@ def generate_submission_previews(
     return PreviewGenerationResult(
         submission_id=submission_id,
         preview_videos=previews,
+    )
+
+
+@app.post("/submissions/{submission_id}/rescore", response_model=SubmissionScore)
+def rescore_submission(
+    submission_id: int,
+    db: Session = Depends(get_db),
+) -> SubmissionScore:
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"submission_id {submission_id} was not found",
+        )
+
+    metadata_count = db.scalar(
+        select(func.count(EvaluationMetadata.id)).where(
+            EvaluationMetadata.submission_id == submission_id
+        )
+    )
+    if not metadata_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="no evaluation metadata is available for this submission yet",
+        )
+
+    payload = _load_process_payload(submission.evaluation_mode)
+    total_acc, eff_score = score_submission_from_csv(
+        db=db,
+        submission=submission,
+        questions_csv_path=payload["questions_csv_path"],
+        answers_csv_path=payload["answers_csv_path"],
+    )
+    submission.acc_score = total_acc
+    submission.eff_score = eff_score
+    db.commit()
+
+    return SubmissionScore(
+        submission_id=submission_id,
+        acc_score=total_acc,
+        eff_score=eff_score,
     )
 
 

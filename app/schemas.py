@@ -95,6 +95,12 @@ class PreviewGenerationResult(BaseModel):
     preview_videos: list[PreviewVideo]
 
 
+class SubmissionScore(BaseModel):
+    submission_id: int
+    acc_score: float
+    eff_score: float
+
+
 class ProcessPendingRequest(BaseModel):
     evaluation_mode: str | None = None
     cctv_id: str | None = None

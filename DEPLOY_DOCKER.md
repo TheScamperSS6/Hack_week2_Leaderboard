@@ -3,7 +3,7 @@
 This deployment runs the full app on one central machine:
 
 - Next.js frontend on port `3000`
-- FastAPI backend on port `8000`
+- FastAPI backend on port `8001`
 - Celery worker
 - Redis
 - PostgreSQL is expected to run on the host machine, outside Docker
@@ -21,7 +21,7 @@ Edit `.env`:
 DATABASE_URL=postgresql+psycopg2://postgres:YOUR_PASSWORD@host.docker.internal:5432/leaderboard
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://YOUR_LAN_IP:3000
 NEXT_PUBLIC_API_BASE_URL=/api
-INTERNAL_API_BASE_URL=http://backend:8000
+INTERNAL_API_BASE_URL=http://backend:8001
 ```
 
 Put the evaluation videos on the host:
@@ -84,13 +84,13 @@ http://YOUR_LAN_IP:3000
 Backend health check:
 
 ```text
-http://YOUR_LAN_IP:8000/health/db
+http://YOUR_LAN_IP:8001/health/db
 ```
 
 The leaderboard defaults to Type Mode ranked by ACC:
 
 ```text
-http://YOUR_LAN_IP:8000/leaderboard
+http://YOUR_LAN_IP:8001/leaderboard
 ```
 
 ## CPU Performance Tuning
@@ -123,6 +123,17 @@ After changing these values in `.env`, restart the worker:
 
 ```bash
 docker compose restart worker
+```
+
+## Upload Size
+
+Model upload goes through the Next.js `/api` proxy. The current frontend config
+allows request bodies up to `200mb`, enough for typical YOLO and classifier ONNX
+files. If this value is changed in `next.config.mjs`, rebuild the frontend image:
+
+```bash
+docker compose build frontend
+docker compose up -d frontend
 ```
 
 ## 4. Logs

@@ -2,6 +2,9 @@ const internalApiBaseUrl = process.env.INTERNAL_API_BASE_URL ?? "http://localhos
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    middlewareClientMaxBodySize: "200mb",
+  },
   async rewrites() {
     return [
       {

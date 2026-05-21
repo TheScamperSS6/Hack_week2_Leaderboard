@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, case, func, literal, select
 from sqlalchemy.orm import Session
 
 from app.models import EvaluationMetadata, Submission
@@ -16,6 +16,7 @@ CCTV_ID_COLUMN = "CCTV ID"
 TIME_RANGE_COLUMN = "Time Range"
 QUERY_COLUMN = "Query"
 ANSWER_COLUMN = "Answer"
+FALLBACK_CAR_BRAND = "Toyota"
 
 
 def parse_timestamp_to_seconds(value: str | int | float) -> float:
@@ -208,7 +209,21 @@ def prediction_query(
 
 def group_column_for_field(field: str):
     if field == "type_or_brand":
-        return func.coalesce(EvaluationMetadata.brand, EvaluationMetadata.vehicle_type)
+        return case(
+            (
+                EvaluationMetadata.vehicle_type == "car",
+                func.coalesce(EvaluationMetadata.brand, literal(FALLBACK_CAR_BRAND)),
+            ),
+            else_=EvaluationMetadata.vehicle_type,
+        )
+    if field == "brand":
+        return case(
+            (
+                EvaluationMetadata.vehicle_type == "car",
+                func.coalesce(EvaluationMetadata.brand, literal(FALLBACK_CAR_BRAND)),
+            ),
+            else_=EvaluationMetadata.brand,
+        )
     return getattr(EvaluationMetadata, field)
 
 
