@@ -12,6 +12,7 @@ class SubmissionStatus(str, enum.Enum):
     processing = "processing"
     done = "done"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class User(Base):
@@ -47,6 +48,7 @@ class Submission(Base):
     labels_json_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evaluation_task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     yolo_gflops: Mapped[float] = mapped_column(Float, nullable=False)
     class_gflops: Mapped[float] = mapped_column(Float, nullable=False)
     acc_score: Mapped[float | None] = mapped_column(Float, nullable=True)

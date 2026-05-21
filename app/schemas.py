@@ -16,9 +16,9 @@ class SubmissionCreated(BaseModel):
     labels_json_path: str | None
     description: str | None
     error_message: str | None = None
+    evaluation_task_id: str | None = None
     yolo_gflops: float
     class_gflops: float
-    evaluation_task_id: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,6 +31,7 @@ class LeaderboardEntry(BaseModel):
     evaluation_mode: str
     description: str | None
     error_message: str | None
+    evaluation_task_id: str | None
     acc_score: float | None
     eff_score: float | None
     yolo_gflops: float
@@ -48,6 +49,7 @@ class SubmissionDetail(BaseModel):
     evaluation_mode: str
     description: str | None
     error_message: str | None
+    evaluation_task_id: str | None
     acc_score: float | None
     eff_score: float | None
     yolo_gflops: float
@@ -85,6 +87,7 @@ class SubmissionResults(BaseModel):
     evaluation_mode: str
     description: str | None
     error_message: str | None
+    evaluation_task_id: str | None
     acc_score: float | None
     eff_score: float | None
     metadata_count: int

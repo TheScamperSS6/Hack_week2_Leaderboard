@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -199,6 +200,7 @@ def run_video_pipeline(
     classifier_model_path: str | Path | None,
     labels_json_path: str | Path | None,
     roi_json_path: str | Path | None = None,
+    should_cancel: Callable[[], None] | None = None,
 ) -> int:
     cv2 = _import_cv2()
     raw_detector = create_raw_yolo_onnx_detector(yolo_model_path)
@@ -206,7 +208,7 @@ def run_video_pipeline(
         yolo_model = _load_yolo(yolo_model_path)
         yolo_imgsz = resolve_yolo_imgsz(yolo_model_path)
     else:
-        logger.info(
+        logger.warning(
             "Using raw YOLO ONNX parser for %s with imgsz=%s and %s classes",
             yolo_model_path,
             raw_detector.imgsz,
@@ -258,6 +260,8 @@ def run_video_pipeline(
             if timestamp + 1e-9 < next_sample_time:
                 continue
             next_sample_time += 1.0 / TARGET_FPS
+            if should_cancel is not None:
+                should_cancel()
 
             if raw_detector is not None:
                 xyxy_rows, class_ids, names = raw_detector.predict(frame)

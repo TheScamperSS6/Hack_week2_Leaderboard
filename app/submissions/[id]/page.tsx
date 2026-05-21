@@ -17,6 +17,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Toast, type ToastState } from "@/components/toast";
 import {
   API_BASE_URL,
+  cancelSubmission,
   fetchSubmissionResults,
   generateSubmissionPreviews,
   type PreviewVideo,
@@ -31,6 +32,7 @@ export default function SubmissionResultsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isGeneratingPreviews, setIsGeneratingPreviews] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
 
   async function loadResults(options?: { refreshing?: boolean }) {
@@ -91,6 +93,27 @@ export default function SubmissionResultsPage() {
     }
   }
 
+  async function handleCancelSubmission() {
+    if (!Number.isFinite(submissionId)) {
+      setToast({ type: "error", message: "Invalid submission id." });
+      return;
+    }
+
+    setIsCancelling(true);
+    try {
+      await cancelSubmission(submissionId);
+      setToast({ type: "success", message: "Submission cancelled." });
+      await loadResults({ refreshing: true });
+    } catch (error) {
+      setToast({
+        type: "error",
+        message: error instanceof Error ? error.message : "Unable to cancel submission.",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
   const averageQuestionScore = useMemo(() => {
     if (!report?.question_results.length) {
       return null;
@@ -141,18 +164,31 @@ export default function SubmissionResultsPage() {
           ) : null}
         </div>
 
-        <button
-          type="button"
-          onClick={() => loadResults({ refreshing: true })}
-          disabled={isRefreshing || isLoading}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
-            aria-hidden="true"
-          />
-          Refresh
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {report && ["pending", "processing"].includes(report.status) ? (
+            <button
+              type="button"
+              onClick={handleCancelSubmission}
+              disabled={isCancelling || isLoading}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-4 text-sm font-semibold text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+              {isCancelling ? "Cancelling..." : "Cancel Task"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => loadResults({ refreshing: true })}
+            disabled={isRefreshing || isLoading}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -166,7 +202,14 @@ export default function SubmissionResultsPage() {
           </section>
 
           {report.error_message ? (
-            <FailurePanel errorMessage={report.error_message} />
+            <FailurePanel
+              errorMessage={report.error_message}
+              title={
+                report.status === "cancelled"
+                  ? "Evaluation cancelled"
+                  : "Evaluation failed"
+              }
+            />
           ) : null}
 
           <PreviewSection
@@ -221,7 +264,13 @@ function ScoreCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FailurePanel({ errorMessage }: { errorMessage: string }) {
+function FailurePanel({
+  errorMessage,
+  title,
+}: {
+  errorMessage: string;
+  title: string;
+}) {
   return (
     <section className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -229,9 +278,7 @@ function FailurePanel({ errorMessage }: { errorMessage: string }) {
           <AlertTriangle className="h-5 w-5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold text-rose-950">
-            Evaluation failed
-          </h2>
+          <h2 className="text-sm font-semibold text-rose-950">{title}</h2>
           <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-rose-200 bg-white p-3 text-xs leading-5 text-rose-950">
             {errorMessage}
           </pre>

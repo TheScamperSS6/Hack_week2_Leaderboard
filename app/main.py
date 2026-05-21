@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 from collections.abc import AsyncIterator
@@ -54,6 +55,7 @@ ALLOWED_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+logger = logging.getLogger(__name__)
 
 
 def _run_startup_migrations() -> None:
@@ -62,6 +64,9 @@ def _run_startup_migrations() -> None:
         if connection.dialect.name == "postgresql":
             connection.execute(
                 text("ALTER TYPE submission_status ADD VALUE IF NOT EXISTS 'failed'")
+            )
+            connection.execute(
+                text("ALTER TYPE submission_status ADD VALUE IF NOT EXISTS 'cancelled'")
             )
 
         inspector = inspect(connection)
@@ -92,6 +97,10 @@ def _run_startup_migrations() -> None:
             if "error_message" not in submission_columns:
                 connection.execute(
                     text("ALTER TABLE submissions ADD COLUMN error_message TEXT")
+                )
+            if "evaluation_task_id" not in submission_columns:
+                connection.execute(
+                    text("ALTER TABLE submissions ADD COLUMN evaluation_task_id TEXT")
                 )
 
         if "evaluation_metadata" not in table_names:
@@ -327,6 +336,61 @@ def _queue_submission_evaluation(submission_id: int, evaluation_mode: str) -> st
     return task.id
 
 
+def _set_submission_task_id(
+    db: Session,
+    submission: Submission,
+    task_id: str | None,
+) -> None:
+    submission.evaluation_task_id = task_id
+    db.commit()
+    db.refresh(submission)
+
+
+def _revoke_submission_task(task_id: str | None) -> None:
+    if not task_id:
+        return
+    try:
+        celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    except Exception:
+        logger.warning("Unable to revoke Celery task %s", task_id, exc_info=True)
+
+
+def _submission_detail(db: Session, submission_id: int) -> SubmissionDetail:
+    row = db.execute(
+        select(
+            Submission.id.label("submission_id"),
+            Submission.user_id,
+            User.team_name,
+            Submission.status,
+            Submission.evaluation_mode,
+            Submission.description,
+            Submission.error_message,
+            Submission.evaluation_task_id,
+            Submission.acc_score,
+            Submission.eff_score,
+            Submission.yolo_gflops,
+            Submission.class_gflops,
+            Submission.yolo_model_path,
+            Submission.class_model_path,
+            Submission.labels_json_path,
+            func.count(EvaluationMetadata.id).label("metadata_count"),
+            Submission.created_at,
+        )
+        .join(User, User.id == Submission.user_id)
+        .outerjoin(EvaluationMetadata, EvaluationMetadata.submission_id == Submission.id)
+        .where(Submission.id == submission_id)
+        .group_by(Submission.id, User.id)
+    ).mappings().one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"submission_id {submission_id} was not found",
+        )
+
+    return SubmissionDetail.model_validate(row)
+
+
 def _video_jobs_from_payload(payload: dict) -> list[dict[str, str]]:
     videos = payload.get("videos")
     if videos:
@@ -485,10 +549,12 @@ def submit_models(
     db.commit()
     db.refresh(submission)
     submission.team_name = user.team_name
-    submission.evaluation_task_id = _enqueue_submission_evaluation(
+    task_id = _enqueue_submission_evaluation(
         submission_id=submission.id,
         evaluation_mode=normalized_mode,
     )
+    _set_submission_task_id(db, submission, task_id)
+    submission.team_name = user.team_name
     return submission
 
 
@@ -508,6 +574,7 @@ def get_leaderboard(
             Submission.evaluation_mode,
             Submission.description,
             Submission.error_message,
+            Submission.evaluation_task_id,
             Submission.acc_score,
             Submission.eff_score,
             Submission.yolo_gflops,
@@ -527,38 +594,7 @@ def get_submission_status(
     submission_id: int,
     db: Session = Depends(get_db),
 ) -> SubmissionDetail:
-    row = db.execute(
-        select(
-            Submission.id.label("submission_id"),
-            Submission.user_id,
-            User.team_name,
-            Submission.status,
-            Submission.evaluation_mode,
-            Submission.description,
-            Submission.error_message,
-            Submission.acc_score,
-            Submission.eff_score,
-            Submission.yolo_gflops,
-            Submission.class_gflops,
-            Submission.yolo_model_path,
-            Submission.class_model_path,
-            Submission.labels_json_path,
-            func.count(EvaluationMetadata.id).label("metadata_count"),
-            Submission.created_at,
-        )
-        .join(User, User.id == Submission.user_id)
-        .outerjoin(EvaluationMetadata, EvaluationMetadata.submission_id == Submission.id)
-        .where(Submission.id == submission_id)
-        .group_by(Submission.id, User.id)
-    ).mappings().one_or_none()
-
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"submission_id {submission_id} was not found",
-        )
-
-    return SubmissionDetail.model_validate(row)
+    return _submission_detail(db, submission_id)
 
 
 @app.get("/submissions/{submission_id}/results", response_model=SubmissionResults)
@@ -575,6 +611,7 @@ def get_submission_results(
             Submission.evaluation_mode,
             Submission.description,
             Submission.error_message,
+            Submission.evaluation_task_id,
             Submission.acc_score,
             Submission.eff_score,
             func.count(EvaluationMetadata.id).label("metadata_count"),
@@ -718,7 +755,43 @@ def retry_submission(
         submission_id=submission.id,
         evaluation_mode=submission.evaluation_mode,
     )
+    _set_submission_task_id(db, submission, task_id)
     return TaskCreated(task_id=task_id, status="PENDING")
+
+
+@app.post("/submissions/{submission_id}/cancel", response_model=SubmissionDetail)
+def cancel_submission(
+    submission_id: int,
+    db: Session = Depends(get_db),
+) -> SubmissionDetail:
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"submission_id {submission_id} was not found",
+        )
+    if submission.status == SubmissionStatus.cancelled:
+        return _submission_detail(db, submission_id)
+    if submission.status not in {
+        SubmissionStatus.pending,
+        SubmissionStatus.processing,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"submission_id {submission_id} cannot be cancelled from "
+                f"status {submission.status.value}"
+            ),
+        )
+
+    task_id = submission.evaluation_task_id
+    submission.status = SubmissionStatus.cancelled
+    submission.error_message = "Cancelled by admin"
+    submission.acc_score = None
+    submission.eff_score = None
+    db.commit()
+    _revoke_submission_task(task_id)
+    return _submission_detail(db, submission_id)
 
 
 @app.post("/process-pending", response_model=TaskCreated)

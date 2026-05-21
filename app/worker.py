@@ -3,6 +3,7 @@ from pathlib import Path
 
 from celery.utils.log import get_task_logger
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.database import SessionLocal
@@ -12,6 +13,10 @@ from app.vision_pipeline import run_video_pipeline
 
 
 logger = get_task_logger(__name__)
+
+
+class SubmissionCancelled(Exception):
+    pass
 
 
 @celery_app.task(name="process_pending_submissions")
@@ -42,14 +47,25 @@ def process_pending_submissions(
             db.scalars(statement)
         )
 
+    queued_task_ids: dict[int, str] = {}
     for submission_id in submission_ids:
-        process_submission.delay(
+        task = process_submission.delay(
             submission_id=submission_id,
             video_jobs=video_jobs,
             questions_csv_path=questions_csv_path,
             answers_csv_path=answers_csv_path,
             roi_json_path=roi_json_path,
         )
+        queued_task_ids[submission_id] = task.id
+
+    if queued_task_ids:
+        with SessionLocal() as db:
+            submissions = db.scalars(
+                select(Submission).where(Submission.id.in_(queued_task_ids))
+            )
+            for submission in submissions:
+                submission.evaluation_task_id = queued_task_ids[submission.id]
+            db.commit()
 
     return submission_ids
 
@@ -77,6 +93,13 @@ def process_submission(
         submission = db.get(Submission, submission_id)
         if submission is None:
             raise ValueError(f"submission_id {submission_id} was not found")
+        if submission.status == SubmissionStatus.cancelled:
+            logger.info("Skipping cancelled submission %s", submission_id)
+            return {
+                "submission_id": submission_id,
+                "metadata_rows": 0,
+                "status": "cancelled",
+            }
         if submission.status != SubmissionStatus.pending:
             logger.info("Skipping submission %s with status %s", submission_id, submission.status)
             return {"submission_id": submission_id, "metadata_rows": 0}
@@ -94,6 +117,7 @@ def process_submission(
 
             metadata_rows = 0
             for video_job in normalized_video_jobs:
+                raise_if_submission_cancelled(db, submission.id)
                 metadata_rows += run_video_pipeline(
                     db=db,
                     submission_id=submission.id,
@@ -107,7 +131,9 @@ def process_submission(
                     ),
                     labels_json_path=submission.labels_json_path,
                     roi_json_path=roi_json_path,
+                    should_cancel=lambda: raise_if_submission_cancelled(db, submission.id),
                 )
+            raise_if_submission_cancelled(db, submission.id)
             total_acc, eff_score = score_submission_from_csv(
                 db=db,
                 submission=submission,
@@ -119,6 +145,21 @@ def process_submission(
             submission.status = SubmissionStatus.done
             submission.error_message = None
             db.commit()
+        except SubmissionCancelled as exc:
+            db.rollback()
+            submission = db.get(Submission, submission_id)
+            if submission is not None:
+                submission.status = SubmissionStatus.cancelled
+                submission.error_message = str(exc)
+                submission.acc_score = None
+                submission.eff_score = None
+                db.commit()
+            logger.info("Cancelled submission %s", submission_id)
+            return {
+                "submission_id": submission_id,
+                "metadata_rows": 0,
+                "status": "cancelled",
+            }
         except Exception as exc:
             error_message = format_failure_message(exc)
             db.rollback()
@@ -143,6 +184,14 @@ def process_submission(
         "acc_score": total_acc,
         "eff_score": eff_score,
     }
+
+
+def raise_if_submission_cancelled(db: Session, submission_id: int) -> None:
+    current_status = db.scalar(
+        select(Submission.status).where(Submission.id == submission_id)
+    )
+    if current_status == SubmissionStatus.cancelled:
+        raise SubmissionCancelled("Cancelled by admin")
 
 
 def format_failure_message(exc: Exception) -> str:

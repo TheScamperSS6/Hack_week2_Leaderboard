@@ -5,6 +5,7 @@ const statusStyles: Record<SubmissionStatus, string> = {
   processing: "border-sky-200 bg-sky-50 text-sky-800",
   done: "border-emerald-200 bg-emerald-50 text-emerald-800",
   failed: "border-rose-200 bg-rose-50 text-rose-800",
+  cancelled: "border-slate-300 bg-slate-100 text-slate-700",
 };
 
 export function StatusBadge({ status }: { status: SubmissionStatus }) {

@@ -7,7 +7,12 @@ const UPLOAD_API_BASE_URL =
 const BACKEND_PORT =
   process.env.NEXT_PUBLIC_BACKEND_PORT?.trim() || "8001";
 
-export type SubmissionStatus = "pending" | "processing" | "done" | "failed";
+export type SubmissionStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed"
+  | "cancelled";
 
 export type LeaderboardEntry = {
   submission_id: number;
@@ -17,6 +22,7 @@ export type LeaderboardEntry = {
   evaluation_mode: "brand" | "type";
   description: string | null;
   error_message: string | null;
+  evaluation_task_id: string | null;
   acc_score: number | null;
   eff_score: number | null;
   yolo_gflops: number;
@@ -44,12 +50,12 @@ export type SubmissionCreated = {
   evaluation_mode: "brand" | "type";
   description: string | null;
   error_message: string | null;
+  evaluation_task_id: string | null;
   yolo_model_path: string;
   class_model_path: string | null;
   labels_json_path: string | null;
   yolo_gflops: number;
   class_gflops: number;
-  evaluation_task_id?: string | null;
 };
 
 export type QuestionResult = {
@@ -78,6 +84,7 @@ export type SubmissionResults = {
   evaluation_mode: "brand" | "type";
   description: string | null;
   error_message: string | null;
+  evaluation_task_id: string | null;
   acc_score: number | null;
   eff_score: number | null;
   metadata_count: number;
@@ -140,6 +147,16 @@ export async function generateSubmissionPreviews(
   }
 
   return response.json();
+}
+
+export async function cancelSubmission(submissionId: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/submissions/${submissionId}/cancel`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(await apiErrorMessage(response, "Unable to cancel submission"));
+  }
 }
 
 export async function submitModel(
