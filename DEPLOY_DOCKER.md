@@ -22,6 +22,8 @@ DATABASE_URL=postgresql+psycopg2://postgres:YOUR_PASSWORD@host.docker.internal:5
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://YOUR_LAN_IP:3000
 NEXT_PUBLIC_API_BASE_URL=/api
 INTERNAL_API_BASE_URL=http://backend:8001
+NEXT_PUBLIC_UPLOAD_API_BASE_URL=
+NEXT_PUBLIC_BACKEND_PORT=8001
 ```
 
 Put the evaluation videos on the host:
@@ -127,9 +129,30 @@ docker compose restart worker
 
 ## Upload Size
 
-Model upload goes through the Next.js `/api` proxy. The current frontend config
-allows request bodies up to `200mb`, enough for typical YOLO and classifier ONNX
-files. If this value is changed in `next.config.mjs`, rebuild the frontend image:
+Model upload goes directly from the browser to FastAPI on port `8001`, bypassing
+the Next.js `/api` proxy so large ONNX and `.onnx.data` files can submit reliably.
+Make sure client machines can reach the backend port and `ALLOWED_ORIGINS`
+contains the frontend origin, for example `http://YOUR_LAN_IP:3000`.
+
+Leave this empty to auto-use the same hostname as the frontend:
+
+```env
+NEXT_PUBLIC_UPLOAD_API_BASE_URL=
+NEXT_PUBLIC_BACKEND_PORT=8001
+```
+
+If the backend is exposed through another URL, set it explicitly:
+
+```env
+NEXT_PUBLIC_UPLOAD_API_BASE_URL=http://YOUR_LAN_IP:8001
+```
+
+Some exported ONNX files use external data, for example
+`vehiclemakenet.onnx.data`. In Brand Mode, upload that sidecar file in the
+`classifier external data` field with its original filename.
+
+The `/api` proxy limit is also set to `200mb` as a fallback. If frontend env vars
+or `next.config.mjs` change, rebuild the frontend image:
 
 ```bash
 docker compose build frontend

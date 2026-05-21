@@ -1,3 +1,4 @@
+import traceback
 from pathlib import Path
 
 from celery.utils.log import get_task_logger
@@ -63,7 +64,7 @@ def process_submission(
     video_path: str | None = None,
     roi_json_path: str | None = None,
     video_jobs: list[dict[str, str]] | None = None,
-) -> dict[str, float | int]:
+) -> dict[str, float | int | str]:
     normalized_video_jobs = normalize_video_jobs(cctv_id, video_path, video_jobs)
     for video_job in normalized_video_jobs:
         _ensure_file_exists(video_job["video_path"])
@@ -80,16 +81,17 @@ def process_submission(
             logger.info("Skipping submission %s with status %s", submission_id, submission.status)
             return {"submission_id": submission_id, "metadata_rows": 0}
 
-        _ensure_file_exists(submission.yolo_model_path)
-        if submission.class_model_path is not None:
-            _ensure_file_exists(submission.class_model_path)
-        if submission.labels_json_path is not None:
-            _ensure_file_exists(submission.labels_json_path)
-
         submission.status = SubmissionStatus.processing
+        submission.error_message = None
         db.commit()
 
         try:
+            _ensure_file_exists(submission.yolo_model_path)
+            if submission.class_model_path is not None:
+                _ensure_file_exists(submission.class_model_path)
+            if submission.labels_json_path is not None:
+                _ensure_file_exists(submission.labels_json_path)
+
             metadata_rows = 0
             for video_job in normalized_video_jobs:
                 metadata_rows += run_video_pipeline(
@@ -115,15 +117,25 @@ def process_submission(
             submission.acc_score = total_acc
             submission.eff_score = eff_score
             submission.status = SubmissionStatus.done
+            submission.error_message = None
             db.commit()
-        except Exception:
+        except Exception as exc:
+            error_message = format_failure_message(exc)
             db.rollback()
             submission = db.get(Submission, submission_id)
             if submission is not None:
-                submission.status = SubmissionStatus.pending
+                submission.status = SubmissionStatus.failed
+                submission.error_message = error_message
+                submission.acc_score = None
+                submission.eff_score = None
                 db.commit()
             logger.exception("Failed to process submission %s", submission_id)
-            raise
+            return {
+                "submission_id": submission_id,
+                "metadata_rows": 0,
+                "status": "failed",
+                "error_message": error_message,
+            }
 
     return {
         "submission_id": submission_id,
@@ -131,6 +143,11 @@ def process_submission(
         "acc_score": total_acc,
         "eff_score": eff_score,
     }
+
+
+def format_failure_message(exc: Exception) -> str:
+    message = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    return message[-8000:]
 
 
 def _ensure_file_exists(path: str | Path | None) -> None:

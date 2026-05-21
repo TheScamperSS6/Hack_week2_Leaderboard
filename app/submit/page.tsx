@@ -33,6 +33,7 @@ export default function SubmitPage() {
   const [classGflops, setClassGflops] = useState("");
   const [yoloFile, setYoloFile] = useState<File | null>(null);
   const [classifierFile, setClassifierFile] = useState<File | null>(null);
+  const [classifierExternalDataFiles, setClassifierExternalDataFiles] = useState<File[]>([]);
   const [labelsFile, setLabelsFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
@@ -81,6 +82,8 @@ export default function SubmitPage() {
         classGflops: evaluationMode === "brand" ? classGflops : "",
         yoloFile,
         classifierFile,
+        classifierExternalDataFiles:
+          evaluationMode === "brand" ? classifierExternalDataFiles : [],
         labelsFile,
       });
 
@@ -96,6 +99,7 @@ export default function SubmitPage() {
       setClassGflops("");
       setYoloFile(null);
       setClassifierFile(null);
+      setClassifierExternalDataFiles([]);
       setLabelsFile(null);
       setFileInputKey((value) => value + 1);
     } catch (error) {
@@ -140,6 +144,7 @@ export default function SubmitPage() {
               setEvaluationMode("type");
               setClassGflops("");
               setClassifierFile(null);
+              setClassifierExternalDataFiles([]);
               setLabelsFile(null);
               setFileInputKey((value) => value + 1);
             }}
@@ -235,6 +240,12 @@ export default function SubmitPage() {
                 accept=".onnx"
                 icon={<UploadCloud className="h-5 w-5" aria-hidden="true" />}
                 onChange={setClassifierFile}
+              />
+              <MultiFileField
+                label="classifier external data (optional)"
+                accept=".data,.bin,application/octet-stream"
+                icon={<UploadCloud className="h-5 w-5" aria-hidden="true" />}
+                onChange={setClassifierExternalDataFiles}
               />
               <FileField
                 label="labels.json"
@@ -344,6 +355,43 @@ function FileField({ label, accept, icon, required = true, onChange }: FileField
           const file = event.target.files?.[0] ?? null;
           setFileName(file?.name ?? "");
           onChange(file);
+        }}
+      />
+    </label>
+  );
+}
+
+function MultiFileField({
+  label,
+  accept,
+  icon,
+  onChange,
+}: {
+  label: string;
+  accept: string;
+  icon: React.ReactNode;
+  onChange: (files: File[]) => void;
+}) {
+  const [fileNames, setFileNames] = useState("");
+
+  return (
+    <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-slate-500 hover:bg-white">
+      <span className="flex h-10 w-10 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm">
+        {icon}
+      </span>
+      <span className="mt-3 text-sm font-semibold text-slate-800">{label}</span>
+      <span className="mt-1 max-w-full truncate text-xs text-slate-500">
+        {fileNames || "Choose file(s)"}
+      </span>
+      <input
+        type="file"
+        accept={accept}
+        multiple
+        className="sr-only"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          setFileNames(files.map((file) => file.name).join(", "));
+          onChange(files);
         }}
       />
     </label>

@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ClipboardList, Film, RefreshCw, Video } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ClipboardList,
+  Film,
+  RefreshCw,
+  Video,
+} from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
 import { Toast, type ToastState } from "@/components/toast";
@@ -158,6 +165,10 @@ export default function SubmissionResultsPage() {
             <ScoreCard label="EFF" value={formatEfficiency(report.eff_score)} />
           </section>
 
+          {report.error_message ? (
+            <FailurePanel errorMessage={report.error_message} />
+          ) : null}
+
           <PreviewSection
             previews={report.preview_videos}
             isGenerating={isGeneratingPreviews}
@@ -207,6 +218,26 @@ function ScoreCard({ label, value }: { label: string; value: string }) {
       </div>
       <div className="mt-2 text-2xl font-semibold text-slate-950">{value}</div>
     </div>
+  );
+}
+
+function FailurePanel({ errorMessage }: { errorMessage: string }) {
+  return (
+    <section className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-rose-700 shadow-sm">
+          <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold text-rose-950">
+            Evaluation failed
+          </h2>
+          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-rose-200 bg-white p-3 text-xs leading-5 text-rose-950">
+            {errorMessage}
+          </pre>
+        </div>
+      </div>
+    </section>
   );
 }
 

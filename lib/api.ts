@@ -1,7 +1,13 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
-export type SubmissionStatus = "pending" | "processing" | "done";
+const UPLOAD_API_BASE_URL =
+  process.env.NEXT_PUBLIC_UPLOAD_API_BASE_URL?.trim() ?? "";
+
+const BACKEND_PORT =
+  process.env.NEXT_PUBLIC_BACKEND_PORT?.trim() || "8001";
+
+export type SubmissionStatus = "pending" | "processing" | "done" | "failed";
 
 export type LeaderboardEntry = {
   submission_id: number;
@@ -10,6 +16,7 @@ export type LeaderboardEntry = {
   status: SubmissionStatus;
   evaluation_mode: "brand" | "type";
   description: string | null;
+  error_message: string | null;
   acc_score: number | null;
   eff_score: number | null;
   yolo_gflops: number;
@@ -25,6 +32,7 @@ export type SubmitModelInput = {
   classGflops: string;
   yoloFile: File;
   classifierFile: File | null;
+  classifierExternalDataFiles: File[];
   labelsFile: File | null;
 };
 
@@ -35,6 +43,7 @@ export type SubmissionCreated = {
   status: SubmissionStatus;
   evaluation_mode: "brand" | "type";
   description: string | null;
+  error_message: string | null;
   yolo_model_path: string;
   class_model_path: string | null;
   labels_json_path: string | null;
@@ -68,6 +77,7 @@ export type SubmissionResults = {
   status: SubmissionStatus;
   evaluation_mode: "brand" | "type";
   description: string | null;
+  error_message: string | null;
   acc_score: number | null;
   eff_score: number | null;
   metadata_count: number;
@@ -121,7 +131,7 @@ export async function fetchSubmissionResults(
 export async function generateSubmissionPreviews(
   submissionId: number,
 ): Promise<PreviewGenerationResult> {
-  const response = await fetch(`${API_BASE_URL}/submissions/${submissionId}/previews`, {
+  const response = await fetch(`${uploadApiBaseUrl()}/submissions/${submissionId}/previews`, {
     method: "POST",
   });
 
@@ -151,11 +161,14 @@ export async function submitModel(
   if (input.classifierFile) {
     formData.append("class_model", input.classifierFile);
   }
+  for (const file of input.classifierExternalDataFiles) {
+    formData.append("class_external_data", file);
+  }
   if (input.labelsFile) {
     formData.append("labels_json", input.labelsFile);
   }
 
-  const response = await fetch(`${API_BASE_URL}/submit`, {
+  const response = await fetch(`${uploadApiBaseUrl()}/submit`, {
     method: "POST",
     body: formData,
   });
@@ -165,6 +178,26 @@ export async function submitModel(
   }
 
   return response.json();
+}
+
+function uploadApiBaseUrl() {
+  if (UPLOAD_API_BASE_URL) {
+    return trimTrailingSlash(UPLOAD_API_BASE_URL);
+  }
+
+  if (API_BASE_URL.startsWith("http://") || API_BASE_URL.startsWith("https://")) {
+    return trimTrailingSlash(API_BASE_URL);
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:${BACKEND_PORT}`;
+  }
+
+  return trimTrailingSlash(API_BASE_URL);
+}
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
 }
 
 async function apiErrorMessage(response: Response, fallback: string) {

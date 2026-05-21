@@ -59,6 +59,11 @@ ALLOWED_ORIGINS = [
 def _run_startup_migrations() -> None:
     """Small compatibility migration for local dev DBs created before Alembic."""
     with engine.begin() as connection:
+        if connection.dialect.name == "postgresql":
+            connection.execute(
+                text("ALTER TYPE submission_status ADD VALUE IF NOT EXISTS 'failed'")
+            )
+
         inspector = inspect(connection)
         table_names = inspector.get_table_names()
         if "submissions" in table_names:
@@ -83,6 +88,10 @@ def _run_startup_migrations() -> None:
             if "description" not in submission_columns:
                 connection.execute(
                     text("ALTER TABLE submissions ADD COLUMN description TEXT")
+                )
+            if "error_message" not in submission_columns:
+                connection.execute(
+                    text("ALTER TABLE submissions ADD COLUMN error_message TEXT")
                 )
 
         if "evaluation_metadata" not in table_names:
@@ -160,6 +169,79 @@ def _save_upload(upload: UploadFile, target_path: Path) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     with target_path.open("wb") as buffer:
         shutil.copyfileobj(upload.file, buffer)
+
+
+def _safe_upload_filename(upload: UploadFile, field_name: str) -> str:
+    raw_name = (upload.filename or "").strip()
+    if not raw_name or "/" in raw_name or "\\" in raw_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} has an invalid filename",
+        )
+
+    safe_name = Path(raw_name).name
+    reserved_names = {"yolo.onnx", "classifier.onnx", "labels.json"}
+    if safe_name in reserved_names:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} cannot be named {safe_name}",
+        )
+    return safe_name
+
+
+def _required_external_data_files(model_path: Path) -> set[str]:
+    try:
+        import onnx
+    except ImportError:
+        return set()
+
+    model = onnx.load(str(model_path), load_external_data=False)
+    required_files: set[str] = set()
+    for initializer in model.graph.initializer:
+        if initializer.data_location != onnx.TensorProto.EXTERNAL:
+            continue
+        for entry in initializer.external_data:
+            if entry.key == "location" and entry.value:
+                required_files.add(entry.value)
+    return required_files
+
+
+def _validate_external_data_files(model_path: Path, model_name: str) -> None:
+    try:
+        required_files = _required_external_data_files(model_path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{model_name} is not a readable ONNX file",
+        ) from exc
+
+    unsupported_files = [
+        file_name
+        for file_name in sorted(required_files)
+        if "/" in file_name or "\\" in file_name or Path(file_name).name != file_name
+    ]
+    if unsupported_files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{model_name} references external data path(s) with folders, "
+                f"which are not supported: {', '.join(unsupported_files)}"
+            ),
+        )
+
+    missing_files = [
+        file_name
+        for file_name in sorted(required_files)
+        if not (model_path.parent / file_name).is_file()
+    ]
+    if missing_files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{model_name} requires external data file(s): "
+                f"{', '.join(missing_files)}. Upload them with the model."
+            ),
+        )
 
 
 def _validate_labels_json(labels_file: UploadFile) -> None:
@@ -299,6 +381,10 @@ def submit_models(
     class_gflops: float | None = Form(None),
     yolo_model: UploadFile = File(..., description="YOLO ONNX file"),
     class_model: UploadFile | None = File(None, description="Classifier ONNX file"),
+    class_external_data: list[UploadFile] | None = File(
+        None,
+        description="Optional external data file(s) referenced by classifier.onnx",
+    ),
     labels_json: UploadFile | None = File(None, description="Labels JSON file"),
     db: Session = Depends(get_db),
 ) -> Submission:
@@ -321,10 +407,18 @@ def submit_models(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="labels.json is required in brand mode",
             )
+    elif class_external_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="class_external_data can only be uploaded in brand mode",
+        )
 
     _validate_extension(yolo_model, ".onnx")
     if class_model is not None:
         _validate_extension(class_model, ".onnx")
+    external_data_files = class_external_data or []
+    for external_data_file in external_data_files:
+        _safe_upload_filename(external_data_file, "class_external_data")
     if labels_json is not None:
         _validate_extension(labels_json, ".json")
         _validate_labels_json(labels_json)
@@ -334,6 +428,7 @@ def submit_models(
         status=SubmissionStatus.pending,
         evaluation_mode=normalized_mode,
         description=(description or "").strip() or None,
+        error_message=None,
         yolo_gflops=0.0,
         class_gflops=0.0,
     )
@@ -349,8 +444,17 @@ def submit_models(
         _save_upload(yolo_model, yolo_path)
         if class_model is not None and class_path is not None:
             _save_upload(class_model, class_path)
+        for external_data_file in external_data_files:
+            external_data_path = submission_dir / _safe_upload_filename(
+                external_data_file,
+                "class_external_data",
+            )
+            _save_upload(external_data_file, external_data_path)
         if labels_json is not None and labels_path is not None:
             _save_upload(labels_json, labels_path)
+        _validate_external_data_files(yolo_path, "yolo.onnx")
+        if class_path is not None:
+            _validate_external_data_files(class_path, "classifier.onnx")
         submission.yolo_gflops = _resolve_gflops("yolo", yolo_gflops, yolo_path)
         submission.class_gflops = (
             _resolve_gflops("class", class_gflops, class_path)
@@ -399,6 +503,7 @@ def get_leaderboard(
             Submission.status,
             Submission.evaluation_mode,
             Submission.description,
+            Submission.error_message,
             Submission.acc_score,
             Submission.eff_score,
             Submission.yolo_gflops,
@@ -426,6 +531,7 @@ def get_submission_status(
             Submission.status,
             Submission.evaluation_mode,
             Submission.description,
+            Submission.error_message,
             Submission.acc_score,
             Submission.eff_score,
             Submission.yolo_gflops,
@@ -464,6 +570,7 @@ def get_submission_results(
             Submission.status,
             Submission.evaluation_mode,
             Submission.description,
+            Submission.error_message,
             Submission.acc_score,
             Submission.eff_score,
             func.count(EvaluationMetadata.id).label("metadata_count"),
