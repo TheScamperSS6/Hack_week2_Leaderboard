@@ -40,14 +40,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000"
+      - "8001:8001"
     volumes:
       - ./data:/app/data
       - ./storage:/app/storage
     depends_on:
       redis:
         condition: service_healthy
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
 
   worker:
     build:
@@ -103,7 +103,7 @@ services:
       dockerfile: Dockerfile.frontend
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
-        INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
+        INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8001}
     image: cv-leaderboard-frontend:latest
     pull_policy: build
     container_name: cv_leaderboard_frontend
@@ -111,7 +111,7 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
-      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8001}
     ports:
       - "3000:3000"
     depends_on:
