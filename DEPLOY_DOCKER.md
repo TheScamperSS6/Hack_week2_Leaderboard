@@ -94,6 +94,23 @@ Rebuild only when dependencies or Dockerfiles change, such as
 `requirements.txt`, `package.json`, `package-lock.json`, `Dockerfile.backend`,
 or `Dockerfile.frontend`.
 
+If the frontend feels slow because Next.js keeps compiling in dev mode, use the
+backend-dev override instead. It keeps FastAPI and Celery live-mounted, but runs
+the frontend in production mode:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.backend-dev.yml up -d --build
+```
+
+For code-only backend updates with that mode:
+
+```bash
+git pull
+docker compose -f docker-compose.yml -f docker-compose.backend-dev.yml restart backend worker
+```
+
+Use this mode for demos or LAN usage when the UI is already stable.
+
 After dependency changes, rebuild the backend image so both `backend` and `worker`
 get the new Python packages:
 
