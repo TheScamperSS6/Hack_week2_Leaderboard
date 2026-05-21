@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,8 @@ DEFAULT_YOLO_NAMES = {
 }
 
 os.environ.setdefault("YOLO_AUTOINSTALL", "false")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,7 @@ def run_video_pipeline(
 ) -> int:
     cv2 = _import_cv2()
     yolo_model = _load_yolo(yolo_model_path)
+    yolo_imgsz = resolve_yolo_imgsz(yolo_model_path)
     classifier_session = (
         _load_classifier_session(classifier_model_path)
         if classifier_model_path is not None
@@ -99,7 +104,7 @@ def run_video_pipeline(
                 persist=True,
                 tracker="bytetrack.yaml",
                 device="cpu",
-                imgsz=YOLO_IMGSZ,
+                imgsz=yolo_imgsz,
                 conf=YOLO_CONF,
                 verbose=False,
             )[0]
@@ -376,6 +381,51 @@ def _load_yolo(yolo_model_path: str | Path) -> Any:
     except ImportError as exc:
         raise RuntimeError("ultralytics is required to run YOLO ONNX tracking") from exc
     return YOLO(str(yolo_model_path), task="detect")
+
+
+def resolve_yolo_imgsz(yolo_model_path: str | Path) -> int | list[int]:
+    fixed_imgsz = fixed_onnx_input_imgsz(str(yolo_model_path))
+    if fixed_imgsz is not None:
+        if fixed_imgsz != YOLO_IMGSZ:
+            logger.info(
+                "Using fixed YOLO ONNX input size %s instead of YOLO_IMGSZ=%s",
+                fixed_imgsz,
+                YOLO_IMGSZ,
+            )
+        return fixed_imgsz
+    return YOLO_IMGSZ
+
+
+@lru_cache(maxsize=64)
+def fixed_onnx_input_imgsz(yolo_model_path: str) -> int | list[int] | None:
+    path = Path(yolo_model_path)
+    if path.suffix.lower() != ".onnx":
+        return None
+
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return None
+
+    try:
+        session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        shape = session.get_inputs()[0].shape
+    except Exception:
+        logger.debug("Unable to inspect ONNX input size for %s", path, exc_info=True)
+        return None
+
+    if len(shape) < 4:
+        return None
+
+    height, width = shape[2], shape[3]
+    if not isinstance(height, int) or not isinstance(width, int):
+        return None
+    if height <= 0 or width <= 0:
+        return None
+
+    if height == width:
+        return height
+    return [height, width]
 
 
 def _load_classifier_session(classifier_model_path: str | Path) -> Any:
