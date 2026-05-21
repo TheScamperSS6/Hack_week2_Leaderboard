@@ -93,6 +93,38 @@ The leaderboard defaults to Type Mode ranked by ACC:
 http://YOUR_LAN_IP:8000/leaderboard
 ```
 
+## CPU Performance Tuning
+
+The worker defaults to:
+
+```env
+EVAL_TARGET_FPS=10
+YOLO_IMGSZ=416
+YOLO_CONF=0.25
+```
+
+For CPU-only machines, this default is the recommended starting point:
+
+```env
+EVAL_TARGET_FPS=5
+YOLO_IMGSZ=416
+YOLO_CONF=0.25
+```
+
+Faster but riskier:
+
+```env
+EVAL_TARGET_FPS=3
+YOLO_IMGSZ=320
+YOLO_CONF=0.30
+```
+
+After changing these values in `.env`, restart the worker:
+
+```bash
+docker compose restart worker
+```
+
 ## 4. Logs
 
 ```bash

@@ -32,6 +32,9 @@ services:
       AUTO_PROCESS_BRAND_PAYLOAD: data/process_payload_brand.example.json
       AUTO_PROCESS_TYPE_PAYLOAD: data/process_payload_type.example.json
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      EVAL_TARGET_FPS: ${EVAL_TARGET_FPS:-10}
+      YOLO_IMGSZ: ${YOLO_IMGSZ:-416}
+      YOLO_CONF: ${YOLO_CONF:-0.25}
       YOLO_AUTOINSTALL: "false"
       YOLO_CONFIG_DIR: /tmp/ultralytics
     extra_hosts:
@@ -65,6 +68,9 @@ services:
       AUTO_PROCESS_SUBMISSIONS: ${AUTO_PROCESS_SUBMISSIONS:-true}
       AUTO_PROCESS_BRAND_PAYLOAD: data/process_payload_brand.example.json
       AUTO_PROCESS_TYPE_PAYLOAD: data/process_payload_type.example.json
+      EVAL_TARGET_FPS: ${EVAL_TARGET_FPS:-10}
+      YOLO_IMGSZ: ${YOLO_IMGSZ:-416}
+      YOLO_CONF: ${YOLO_CONF:-0.25}
       YOLO_AUTOINSTALL: "false"
       YOLO_CONFIG_DIR: /tmp/ultralytics
       CELERY_TASK_TIME_LIMIT: ${CELERY_TASK_TIME_LIMIT:-7200}

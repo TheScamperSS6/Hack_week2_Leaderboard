@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from app.models import EvaluationMetadata
 
 
-TARGET_FPS = 10.0
+TARGET_FPS = float(os.getenv("EVAL_TARGET_FPS", "10.0"))
+YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "416"))
+YOLO_CONF = float(os.getenv("YOLO_CONF", "0.25"))
 CLASSIFIER_IMAGE_SIZE = (224, 224)
 BYPASS_VEHICLE_TYPES = {"truck", "motorcycle", "bus"}
 SUPPORTED_VEHICLE_TYPES = {"car", "truck", "motorcycle", "bus"}
@@ -97,6 +99,8 @@ def run_video_pipeline(
                 persist=True,
                 tracker="bytetrack.yaml",
                 device="cpu",
+                imgsz=YOLO_IMGSZ,
+                conf=YOLO_CONF,
                 verbose=False,
             )[0]
             boxes = getattr(result, "boxes", None)
