@@ -67,6 +67,14 @@ Then restart PostgreSQL.
 docker compose up -d --build
 ```
 
+After dependency changes, rebuild the backend image so both `backend` and `worker`
+get the new Python packages:
+
+```bash
+docker compose build --no-cache backend worker
+docker compose up -d
+```
+
 Open from another machine on the same Wi-Fi:
 
 ```text
