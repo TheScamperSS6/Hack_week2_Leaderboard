@@ -310,6 +310,10 @@ def _enqueue_submission_evaluation(submission_id: int, evaluation_mode: str) -> 
     if not AUTO_PROCESS_SUBMISSIONS:
         return None
 
+    return _queue_submission_evaluation(submission_id, evaluation_mode)
+
+
+def _queue_submission_evaluation(submission_id: int, evaluation_mode: str) -> str:
     payload = _load_process_payload(evaluation_mode)
     task = process_submission.delay(
         submission_id=submission_id,
@@ -685,6 +689,36 @@ def rescore_submission(
         acc_score=total_acc,
         eff_score=eff_score,
     )
+
+
+@app.post("/submissions/{submission_id}/retry", response_model=TaskCreated)
+def retry_submission(
+    submission_id: int,
+    db: Session = Depends(get_db),
+) -> TaskCreated:
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"submission_id {submission_id} was not found",
+        )
+    if submission.status == SubmissionStatus.processing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"submission_id {submission_id} is already processing",
+        )
+
+    submission.status = SubmissionStatus.pending
+    submission.error_message = None
+    submission.acc_score = None
+    submission.eff_score = None
+    db.commit()
+
+    task_id = _queue_submission_evaluation(
+        submission_id=submission.id,
+        evaluation_mode=submission.evaluation_mode,
+    )
+    return TaskCreated(task_id=task_id, status="PENDING")
 
 
 @app.post("/process-pending", response_model=TaskCreated)

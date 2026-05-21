@@ -265,6 +265,8 @@ export default function SubmitPage() {
           )}
         </div>
 
+        <LabelJsonGuide mode={evaluationMode} />
+
         <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-end">
           <Link
             href="/"
@@ -287,6 +289,59 @@ export default function SubmitPage() {
         </div>
       </form>
     </main>
+  );
+}
+
+function LabelJsonGuide({ mode }: { mode: EvaluationMode }) {
+  const typeExample = `{
+  "yolo": {
+    "0": "car",
+    "1": "truck",
+    "2": "bus",
+    "3": "motorcycle"
+  }
+}`;
+
+  const brandExample = `{
+  "yolo": {
+    "2": "car",
+    "3": "motorcycle",
+    "5": "bus",
+    "7": "truck"
+  },
+  "classifier": {
+    "0": "Toyota",
+    "1": "Honda",
+    "2": "Nissan"
+  }
+}`;
+
+  return (
+    <details className="mt-5 border-t border-slate-200 pt-4 text-sm" open>
+      <summary className="cursor-pointer font-semibold text-slate-800">
+        labels.json format
+      </summary>
+      <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+        <pre className="max-h-80 overflow-auto rounded-md bg-slate-950 p-4 text-xs leading-relaxed text-slate-100">
+          <code>{mode === "brand" ? brandExample : typeExample}</code>
+        </pre>
+        <div className="space-y-2 text-slate-600">
+          <p>
+            Class IDs must match the model output order. Type mode accepts YOLO labels only.
+          </p>
+          <p>
+            Brand mode requires YOLO labels plus classifier labels. Only cars are sent to
+            the classifier; truck, bus, and motorcycle skip brand prediction.
+          </p>
+          <p>
+            Accepted type values are <span className="font-semibold text-slate-800">car</span>,{" "}
+            <span className="font-semibold text-slate-800">truck</span>,{" "}
+            <span className="font-semibold text-slate-800">bus</span>, and{" "}
+            <span className="font-semibold text-slate-800">motorcycle</span>.
+          </p>
+        </div>
+      </div>
+    </details>
   );
 }
 

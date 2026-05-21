@@ -69,6 +69,31 @@ Then restart PostgreSQL.
 docker compose up -d --build
 ```
 
+## Dev Mode Without Rebuilding
+
+For active code edits, run Compose with the dev override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+After that first build, code changes are bind-mounted from the host:
+
+- FastAPI reloads automatically.
+- Next.js runs in dev mode and hot-reloads UI changes.
+- Celery worker restarts when Python files change.
+
+For normal code-only updates:
+
+```bash
+git pull
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart worker
+```
+
+Rebuild only when dependencies or Dockerfiles change, such as
+`requirements.txt`, `package.json`, `package-lock.json`, `Dockerfile.backend`,
+or `Dockerfile.frontend`.
+
 After dependency changes, rebuild the backend image so both `backend` and `worker`
 get the new Python packages:
 
@@ -103,6 +128,10 @@ The worker defaults to:
 EVAL_TARGET_FPS=10
 YOLO_IMGSZ=416
 YOLO_CONF=0.25
+TRACKER_BACKEND=auto
+TRACKER_MAX_FRAME_ERRORS=25
+SIMPLE_TRACKER_IOU=0.30
+SIMPLE_TRACKER_MAX_AGE=30
 ```
 
 For CPU-only machines, this default is the recommended starting point:
@@ -111,6 +140,10 @@ For CPU-only machines, this default is the recommended starting point:
 EVAL_TARGET_FPS=5
 YOLO_IMGSZ=416
 YOLO_CONF=0.25
+TRACKER_BACKEND=auto
+TRACKER_MAX_FRAME_ERRORS=25
+SIMPLE_TRACKER_IOU=0.30
+SIMPLE_TRACKER_MAX_AGE=30
 ```
 
 Faster but riskier:
@@ -119,6 +152,10 @@ Faster but riskier:
 EVAL_TARGET_FPS=3
 YOLO_IMGSZ=320
 YOLO_CONF=0.30
+TRACKER_BACKEND=auto
+TRACKER_MAX_FRAME_ERRORS=25
+SIMPLE_TRACKER_IOU=0.30
+SIMPLE_TRACKER_MAX_AGE=30
 ```
 
 After changing these values in `.env`, restart the worker:
@@ -126,6 +163,10 @@ After changing these values in `.env`, restart the worker:
 ```bash
 docker compose restart worker
 ```
+
+`TRACKER_BACKEND=auto` uses ByteTrack first and falls back to a simple IoU
+tracker if ByteTrack hits numerical errors. Use `TRACKER_BACKEND=simple` to skip
+ByteTrack entirely for models that consistently break Ultralytics tracking.
 
 ## Upload Size
 
